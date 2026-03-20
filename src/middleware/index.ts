@@ -37,6 +37,9 @@ export {
   MAX_SKILL_DESCRIPTION_LENGTH,
 } from "./skills.js";
 
+// Verify middleware — quality gate using ROLE.md
+export { createVerifyMiddleware } from "./verify.js";
+
 // Middleware utilities
 export { appendToSystemMessage, prependToSystemMessage } from "./utils.js";
 

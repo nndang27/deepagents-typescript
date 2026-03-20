@@ -15,6 +15,11 @@ import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { filesValue } from "../values.js";
 import { StateSchema } from "@langchain/langgraph";
 
+// [COGNITION-LAZY-LOAD] START — added by cognition system refactor
+import { CognitionLoader, LAZY_LOAD_TABLE } from "../cognition/loader.js";
+import { readPersonaModuleTool } from "../tools/readPersonaModule.js";
+// [COGNITION-LAZY-LOAD] END
+
 /**
  * Options for the memory middleware.
  */
@@ -257,7 +262,8 @@ export function createMemoryMiddleware(options: MemoryMiddlewareOptions) {
       return { memoryContents: contents };
     },
 
-    wrapModelCall(request, handler) {
+    // [COGNITION-LAZY-LOAD] START — added by cognition system refactor
+    async wrapModelCall(request, handler) {
       // Get memory contents from state
       const memoryContents: Record<string, string> =
         request.state?.memoryContents || {};
@@ -268,6 +274,18 @@ export function createMemoryMiddleware(options: MemoryMiddlewareOptions) {
         "{memory_contents}",
         formattedContents,
       );
+
+      // Load always-on cognition modules (MANIFEST + ROLE + ETHICS)
+      let cognitionSection = "";
+      try {
+        cognitionSection = await CognitionLoader.loadAlwaysOnModules();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[MemoryMiddleware] Failed to load always-on cognition modules:",
+          err instanceof Error ? err.message : err,
+        );
+      }
 
       const existingContent = request.systemMessage.content;
       const existingBlocks =
@@ -280,6 +298,13 @@ export function createMemoryMiddleware(options: MemoryMiddlewareOptions) {
       const newSystemMessage = new SystemMessage({
         content: [
           ...existingBlocks,
+          // Inject always-on cognition modules
+          ...(cognitionSection
+            ? [{ type: "text" as const, text: cognitionSection }]
+            : []),
+          // Inject lazy-load instruction table
+          { type: "text" as const, text: LAZY_LOAD_TABLE },
+          // Inject memory section
           {
             type: "text" as const,
             text: memorySection,
@@ -290,10 +315,21 @@ export function createMemoryMiddleware(options: MemoryMiddlewareOptions) {
         ],
       });
 
+      // Register read_persona_module tool alongside existing tools
+      const existingTools = request.tools ?? [];
+      const hasPersonaTool = existingTools.some(
+        (t: any) => t.name === "read_persona_module",
+      );
+      const updatedTools = hasPersonaTool
+        ? existingTools
+        : [...existingTools, readPersonaModuleTool];
+
       return handler({
         ...request,
         systemMessage: newSystemMessage,
+        tools: updatedTools,
       });
     },
+    // [COGNITION-LAZY-LOAD] END
   });
 }

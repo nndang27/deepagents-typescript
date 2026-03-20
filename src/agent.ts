@@ -43,6 +43,11 @@ import type * as _Command from "@langchain/langgraph";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import { createCacheBreakpointMiddleware } from "./middleware/cache.js";
 
+// [COGNITION-SUBAGENT-PERSONA] START — added by cognition system refactor
+import { buildPersonaSystemPrompt } from "./cognition/loader.js";
+import { readPersonaModuleTool } from "./tools/readPersonaModule.js";
+// [COGNITION-SUBAGENT-PERSONA] END
+
 const BASE_PROMPT = `In order to complete the objective that the user asks of you, you have access to a number of standard tools.`;
 
 /**
@@ -155,6 +160,7 @@ export function createDeepAgent<
       : [];
 
 
+  // [COGNITION-SUBAGENT-PERSONA] START — added by cognition system refactor
   const processedSubagents = subagents.map((subagent) => {
     /**
      * CompiledSubAgent - use as-is (already has its own middleware baked in)
@@ -164,14 +170,19 @@ export function createDeepAgent<
     }
 
     /**
-     * SubAgent without skills - use as-is
+     * SubAgent without skills - add readPersonaModuleTool for cognition access
      */
     if (!("skills" in subagent) || subagent.skills?.length === 0) {
-      return subagent;
+      const existingTools = (subagent as any).tools ?? [];
+      return {
+        ...subagent,
+        tools: [...existingTools, readPersonaModuleTool],
+      };
     }
 
     /**
      * SubAgent with skills - add SkillsMiddleware BEFORE user's middleware
+     * and include readPersonaModuleTool for cognition access.
      * Order: base middleware (via defaultMiddleware) → skills → user's middleware
      * This matches Python's ordering in create_deep_agent
      */
@@ -180,14 +191,17 @@ export function createDeepAgent<
       sources: subagent.skills ?? [],
     });
 
+    const existingTools = (subagent as any).tools ?? [];
     return {
       ...subagent,
+      tools: [...existingTools, readPersonaModuleTool],
       middleware: [
         subagentSkillsMiddleware,
         ...(subagent.middleware || []),
       ] as readonly AgentMiddleware[],
     };
   });
+  // [COGNITION-SUBAGENT-PERSONA] END
 
 
   const subagentMiddleware = [
